@@ -1,0 +1,203 @@
+/* Artwork Card styles — ArtVault */
+
+.artwork-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color var(--transition-base), transform var(--transition-base);
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+
+.artwork-card:hover {
+  border-color: var(--color-border-strong);
+  transform: translateY(-2px);
+}
+
+/* Image link wrapper (replaces old outer <Link>) */
+.artwork-card-image-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+/* Title link */
+.artwork-card-title-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.artwork-card-title-link:hover .artwork-card-title {
+  color: var(--color-accent);
+  transition: color var(--transition-fast);
+}
+
+.artwork-card:hover .artwork-card-image img {
+  transform: scale(1.03);
+}
+
+.artwork-card-image {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  background: var(--color-surface-elevated);
+}
+
+.artwork-card-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--transition-slow);
+  display: block;
+}
+
+.artwork-card-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(15,14,13,0.8) 0%, transparent 50%);
+  opacity: 0;
+  transition: opacity var(--transition-base);
+  display: flex;
+  align-items: flex-end;
+  padding: 16px;
+  gap: 8px;
+}
+
+.artwork-card:hover .artwork-card-overlay {
+  opacity: 1;
+}
+
+.artwork-card-category {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+}
+
+.artwork-card-units-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(15,14,13,0.8);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border);
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+}
+
+.artwork-card-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.artwork-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.artwork-card-title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--color-text-primary);
+  line-height: 1.2;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.artwork-card-artist {
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+}
+
+.artwork-card-market {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.artwork-card-market-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.market-item-label {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.market-item-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.market-item-value.positive { color: var(--color-positive); }
+.market-item-value.negative { color: var(--color-negative); }
+
+.artwork-card-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+/* Grid layouts */
+.artwork-grid {
+  display: grid;
+  gap: 20px;
+}
+
+.artwork-grid-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.artwork-grid-featured {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.artwork-grid-featured .artwork-card:first-child {
+  grid-column: span 2;
+}
+
+.artwork-grid-featured .artwork-card:first-child .artwork-card-image {
+  aspect-ratio: 16 / 9;
+}
+
+@media (max-width: 1024px) {
+  .artwork-grid-3,
+  .artwork-grid-featured {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .artwork-grid-featured .artwork-card:first-child {
+    grid-column: span 1;
+  }
+
+  .artwork-grid-featured .artwork-card:first-child .artwork-card-image {
+    aspect-ratio: 4 / 3;
+  }
+}
+
+@media (max-width: 640px) {
+  .artwork-grid-3,
+  .artwork-grid-featured {
+    grid-template-columns: 1fr;
+  }
+}
