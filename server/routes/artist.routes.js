@@ -1,16 +1,14 @@
-const marketService = require('../services/market.service');
-const productService = require('../services/product.service');
-const asyncHandler = require('../utils/asyncHandler');
+const router = require('express').Router();
 
-exports.createMarket = asyncHandler(async (req, res) => {
-  const market = await marketService.createMarket(req.user, req.body || {});
-  res.status(201).json({ market });
-});
+const ctrl = require('../controllers/artist.controller');
+const { authenticate, requireRole } = require('../middleware/auth');
 
-exports.myMarket = asyncHandler(async (req, res) => {
-  res.json(await marketService.getMyMarket(req.user));
-});
+const artist = [authenticate, requireRole('ARTIST')];
 
-exports.myProducts = asyncHandler(async (req, res) => {
-  res.json({ products: await productService.listMine(req.user) });
-});
+router.post('/market', ...artist, ctrl.createMarket);
+
+router.get('/market', ...artist, ctrl.myMarket);
+
+router.get('/products', ...artist, ctrl.myProducts);
+
+module.exports = router;
