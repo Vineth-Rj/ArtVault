@@ -1,0 +1,321 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  ARTIST
+  COLLECTOR
+  ADMIN
+}
+
+enum UnitStatus {
+  AVAILABLE // unsold, in the artist's primary inventory (ownerId = null)
+  OWNED     // owned by a user, not listed
+  LISTED    // owned by a user, has an OPEN sell order
+}
+
+enum OrderStatus { // used for unit sell orders and unit bids
+  OPEN
+  FILLED
+  CANCELLED
+}
+
+enum ProductStatus {
+  ACTIVE
+  SOLD_OUT
+  REMOVED
+}
+
+enum ProductOrderStatus {
+  COMPLETED
+  CANCELLED
+}
+
+enum TransactionType { // unit trades
+  PRIMARY
+  SECONDARY
+}
+
+enum EarningSource {
+  ORDER  // a buyer purchased a product
+  COLLAB // artist logged collaboration income (demo / future)
+}
+
+enum WalletTxType {
+  DEPOSIT
+  PRODUCT_PURCHASE
+  PRODUCT_EARNING
+  COLLAB_EARNING
+  UNIT_PURCHASE
+  UNIT_SALE
+  UNIT_PRIMARY_EARNING
+  ROYALTY
+  UNIT_PAYOUT
+}
+
+model User {
+  id            String   @id @default(uuid())
+  name          String
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  avatar        String?
+  bio           String?
+  role          Role     @default(COLLECTOR)
+  walletBalance Decimal  @default(0) @map("wallet_balance") @db.Decimal(14, 2)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  artistMarket       ArtistMarket?
+  products           Product[]
+  perks              Perk[]
+  earnings           ArtistEarning[]
+  payouts            UnitPayout[]
+  ownedUnits         ArtUnit[]           @relation("UnitOwner")
+  issuedUnits        ArtUnit[]           @relation("UnitArtist")
+  unitPurchases      Transaction[]       @relation("Buyer")
+  unitSales          Transaction[]       @relation("Seller")
+  artistUnitTrades   Transaction[]       @relation("TxArtist")
+  productOrders      ProductOrder[]      @relation("OrderBuyer")
+  artistOrders       ProductOrder[]      @relation("OrderArtist")
+  walletTransactions WalletTransaction[]
+  sellOrders         SellOrder[]
+  bids               BuyOrder[]          @relation("BidBuyer")
+  bidsReceived       BuyOrder[]          @relation("BidArtist")
+
+  @@map("users")
+}
+
+// One market per artist. Units are the artist's tradable "backing" units.
+// Current price = latest executed unit trade price. Supply is fixed at launch.
+model ArtistMarket {
+  id                   String   @id @default(uuid())
+  artistId             String   @unique @map("artist_id")
+  totalUnits           Int      @map("total_units")
+  initialPrice         Decimal  @map("initial_price") @db.Decimal(14, 2)
+  currentPrice         Decimal  @map("current_price") @db.Decimal(14, 2)
+  earningsSharePercent Decimal  @default(20) @map("earnings_share_percent") @db.Decimal(5, 2)
+  unitsSold            Int      @default(0) @map("units_sold")
+  totalHolders         Int      @default(0) @map("total_holders")
+  tradingVolume        Decimal  @default(0) @map("trading_volume") @db.Decimal(14, 2)
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  artist User @relation(fields: [artistId], references: [id])
+
+  @@map("artist_markets")
+}
+
+// A product (artwork) that buyers purchase directly. Not tradable.
+model Product {
+  id          String        @id @default(uuid())
+  artistId    String        @map("artist_id")
+  title       String
+  description String
+  story       String?
+  imageUrl    String        @map("image_url")
+  category    String
+  artType     String        @map("art_type")
+  price       Decimal       @db.Decimal(14, 2)
+  stock       Int
+  soldCount   Int           @default(0) @map("sold_count")
+  status      ProductStatus @default(ACTIVE)
+
+  // Gemini-generated discovery metadata
+  aiTags        String[] @default([]) @map("ai_tags")
+  aiStyle       String?  @map("ai_style")
+  aiMood        String?  @map("ai_mood")
+  aiThemes      String[] @default([]) @map("ai_themes")
+  aiKeywords    String[] @default([]) @map("ai_keywords")
+  aiDescription String?  @map("ai_description")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  artist User           @relation(fields: [artistId], references: [id])
+  orders ProductOrder[]
+
+  @@index([artistId])
+  @@index([category])
+  @@map("products")
+}
+
+model ProductOrder {
+  id         String             @id @default(uuid())
+  productId  String             @map("product_id")
+  buyerId    String             @map("buyer_id")
+  artistId   String             @map("artist_id")
+  quantity   Int                @default(1)
+  totalPrice Decimal            @map("total_price") @db.Decimal(14, 2)
+  status     ProductOrderStatus @default(COMPLETED)
+  createdAt  DateTime           @default(now()) @map("created_at")
+
+  product Product         @relation(fields: [productId], references: [id])
+  buyer   User            @relation("OrderBuyer", fields: [buyerId], references: [id])
+  artist  User            @relation("OrderArtist", fields: [artistId], references: [id])
+  earning ArtistEarning?
+
+  @@index([buyerId])
+  @@index([artistId, createdAt])
+  @@map("product_orders")
+}
+
+// Every income event for an artist. Splits money between platform, holders and artist.
+//   net          = grossAmount - platformFee
+//   holdersPool  = net * earningsSharePercent
+//   perUnitPayout= holdersPool / totalUnits   (unsold units' share stays with the artist)
+//   artistNet    = net - holdersPaid
+model ArtistEarning {
+  id            String        @id @default(uuid())
+  artistId      String        @map("artist_id")
+  source        EarningSource
+  orderId       String?       @unique @map("order_id")
+  grossAmount   Decimal       @map("gross_amount") @db.Decimal(14, 2)
+  platformFee   Decimal       @map("platform_fee") @db.Decimal(14, 2)
+  holdersPool   Decimal       @map("holders_pool") @db.Decimal(14, 2)
+  perUnitPayout Decimal       @map("per_unit_payout") @db.Decimal(14, 6)
+  unitsPaid     Int           @map("units_paid")
+  holdersPaid   Decimal       @map("holders_paid") @db.Decimal(14, 2)
+  artistNet     Decimal       @map("artist_net") @db.Decimal(14, 2)
+  description   String?
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  artist  User          @relation(fields: [artistId], references: [id])
+  order   ProductOrder? @relation(fields: [orderId], references: [id])
+  payouts UnitPayout[]
+
+  @@index([artistId, createdAt])
+  @@map("artist_earnings")
+}
+
+// One row per holder per earning event
+model UnitPayout {
+  id        String   @id @default(uuid())
+  earningId String   @map("earning_id")
+  holderId  String   @map("holder_id")
+  unitsHeld Int      @map("units_held")
+  amount    Decimal  @db.Decimal(14, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  earning ArtistEarning @relation(fields: [earningId], references: [id], onDelete: Cascade)
+  holder  User          @relation(fields: [holderId], references: [id])
+
+  @@index([holderId, createdAt])
+  @@index([earningId])
+  @@map("unit_payouts")
+}
+
+// Simple flag-style perks for holders, e.g. "hold 5+ units to vote on next collab"
+model Perk {
+  id          String   @id @default(uuid())
+  artistId    String   @map("artist_id")
+  title       String
+  description String
+  minUnits    Int      @default(1) @map("min_units")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  artist User @relation(fields: [artistId], references: [id])
+
+  @@index([artistId])
+  @@map("perks")
+}
+
+// One row = one complete Artist Unit
+model ArtUnit {
+  id            String     @id @default(uuid())
+  artistId      String     @map("artist_id")
+  unitNumber    Int        @map("unit_number")
+  ownerId       String?    @map("owner_id")
+  purchasePrice Decimal?   @map("purchase_price") @db.Decimal(14, 2)
+  currentValue  Decimal    @map("current_value") @db.Decimal(14, 2)
+  status        UnitStatus @default(AVAILABLE)
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  artist       User          @relation("UnitArtist", fields: [artistId], references: [id])
+  owner        User?         @relation("UnitOwner", fields: [ownerId], references: [id])
+  sellOrders   SellOrder[]
+  transactions Transaction[]
+
+  @@unique([artistId, unitNumber])
+  @@index([ownerId])
+  @@index([artistId, status])
+  @@map("art_units")
+}
+
+// Unit trades only (product purchases live in product_orders)
+model Transaction {
+  id              String          @id @default(uuid())
+  artistId        String          @map("artist_id")
+  unitId          String          @map("unit_id")
+  sellerId        String?         @map("seller_id") // null for primary sales
+  buyerId         String          @map("buyer_id")
+  price           Decimal         @db.Decimal(14, 2)
+  platformFee     Decimal         @default(0) @map("platform_fee") @db.Decimal(14, 2)
+  artistRoyalty   Decimal         @default(0) @map("artist_royalty") @db.Decimal(14, 2)
+  transactionType TransactionType @map("transaction_type")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  artist User    @relation("TxArtist", fields: [artistId], references: [id])
+  unit   ArtUnit @relation(fields: [unitId], references: [id])
+  seller User?   @relation("Seller", fields: [sellerId], references: [id])
+  buyer  User    @relation("Buyer", fields: [buyerId], references: [id])
+
+  @@index([artistId, createdAt])
+  @@index([buyerId])
+  @@index([sellerId])
+  @@map("transactions")
+}
+
+// Append-only ledger. users.wallet_balance is the running total of these rows.
+model WalletTransaction {
+  id          String       @id @default(uuid())
+  userId      String       @map("user_id")
+  amount      Decimal      @db.Decimal(14, 2) // signed: negative = debit
+  type        WalletTxType
+  referenceId String?      @map("reference_id")
+  description String?
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@map("wallet_transactions")
+}
+
+model SellOrder {
+  id          String      @id @default(uuid())
+  unitId      String      @map("unit_id")
+  sellerId    String      @map("seller_id")
+  askingPrice Decimal     @map("asking_price") @db.Decimal(14, 2)
+  status      OrderStatus @default(OPEN)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  unit   ArtUnit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  seller User    @relation(fields: [sellerId], references: [id])
+
+  @@index([unitId, status])
+  @@index([sellerId])
+  @@map("sell_orders")
+}
+
+// Optional for MVP (bids on an artist's units)
+model BuyOrder {
+  id           String      @id @default(uuid())
+  artistId     String      @map("artist_id")
+  buyerId      String      @map("buyer_id")
+  offeredPrice Decimal     @map("offered_price") @db.Decimal(14, 2)
+  status       OrderStatus @default(OPEN)
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  artist User @relation("BidArtist", fields: [artistId], references: [id])
+  buyer  User @relation("BidBuyer", fields: [buyerId], references: [id])
+
+  @@index([artistId, status])
+  @@map("buy_orders")
+}
